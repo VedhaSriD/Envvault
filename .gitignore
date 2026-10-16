@@ -1,6 +1,11 @@
 .env
+!.env.example
+*.env
 *.db
 __pycache__/
 .pytest_cache/
 venv/
 .venv/
+*.egg-info/
+install_output.txt
+test_output.txt

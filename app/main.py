@@ -11,7 +11,7 @@ from app.core.database import Base, engine
 from app.middlewares.cors import setup_cors
 from app.middlewares.error_handler import register_error_handlers
 from app.middlewares.logging import RequestLoggingMiddleware
-from app.routes import audit, auth, health, members, secrets, sharing, teams
+from app.routes import audit, auth, health, members, rotation, secrets, sharing, teams
 
 
 @asynccontextmanager
@@ -25,7 +25,7 @@ def create_app() -> FastAPI:
     setup_cors(application, settings.cors_origin_list)
     application.add_middleware(RequestLoggingMiddleware)
     register_error_handlers(application)
-    for module in (health, auth, teams, members, secrets, sharing, audit):
+    for module in (health, auth, teams, members, secrets, sharing, rotation, audit):
         application.include_router(module.router)
     return application
 

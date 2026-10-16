@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "envvault-cli"
+version = "0.1.0"
+description = "Zero-knowledge CLI for Envvault: encrypt .env files on your machine and share them with your team"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "typer>=0.12",
+  "cryptography>=43",
+  "requests>=2.32",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+envvault = "envvault_cli.cli:run"
+
+[tool.setuptools]
+packages = ["envvault_cli"]
