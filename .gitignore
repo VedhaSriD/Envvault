@@ -9,3 +9,5 @@ venv/
 *.egg-info/
 install_output.txt
 test_output.txt
+frontend/vite.config.js.timestamp-*
+envvault-test/
