@@ -11,11 +11,17 @@ import Button from "../components/Button.jsx";
 import Modal from "../components/Modal.jsx";
 import CommandBlock from "../components/CommandBlock.jsx";
 import Typewriter from "../components/Typewriter.jsx";
+import PixelSprite from "../components/PixelArt.jsx";
+import Identicon from "../components/dashboard/Identicon.jsx";
+import Sparkline from "../components/dashboard/Sparkline.jsx";
+import Heartbeat from "../components/dashboard/Heartbeat.jsx";
 import { SkeletonList } from "../components/Skeleton.jsx";
 import PulseGrid from "../components/backdrops/PulseGrid.jsx";
 import { staggerContainer, staggerItem, easeOut } from "../lib/motion.js";
 
 const EMPTY_DETAIL = { loading: false, secrets: [], members: [], audit: null };
+const DAY_MS = 24 * 60 * 60 * 1000;
+const ROTATION_WINDOW_DAYS = 3;
 
 function labelOf(entry) {
   if (entry.action === "secret.update" && entry.detail === "rotated") return "Secret rotated";
@@ -27,6 +33,31 @@ function toneOf(action) {
   if (action.includes("share") || action.includes("add") || action.includes("create")) return "log-share";
   if (action.includes("update")) return "log-update";
   return "";
+}
+
+// Last 7 days as counts, oldest first. Used for sparklines and the bar chart.
+function countsByDay(entries) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(today);
+    day.setDate(today.getDate() - (6 - index));
+    return { key: day.toDateString(), label: day.toLocaleDateString(undefined, { weekday: "short" }), count: 0 };
+  });
+  (entries || []).forEach((entry) => {
+    const when = parseDate(entry.created_at);
+    if (!when) return;
+    const match = days.find((day) => day.key === when.toDateString());
+    if (match) match.count += 1;
+  });
+  return days;
+}
+
+// A secret needs attention when it was rotated recently (version bumped in the last few days).
+function isRecentlyRotated(secret) {
+  const updated = parseDate(secret.updated_at);
+  if (!updated) return false;
+  return Date.now() - updated.getTime() < ROTATION_WINDOW_DAYS * DAY_MS && secret.version > 1;
 }
 
 export default function Dashboard() {
@@ -89,8 +120,6 @@ export default function Dashboard() {
   const selectedTeamId = selected ? selected.id : null;
   const isAdmin = selected ? selected.role === "admin" : false;
 
-  // Loads the right-hand panel whenever the selected team changes.
-  // The audit log is admin-only, so members skip that request.
   useEffect(() => {
     if (!selectedTeamId) {
       setDetail(EMPTY_DETAIL);
@@ -122,31 +151,13 @@ export default function Dashboard() {
   const totalSecrets = Object.values(secretCounts).reduce((sum, count) => sum + count, 0);
   const adminTeams = teams ? teams.filter((team) => team.role === "admin").length : 0;
 
-  // Counts audit entries for each of the last seven days, oldest first.
-  const week = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const days = Array.from({ length: 7 }, (_, index) => {
-      const day = new Date(today);
-      day.setDate(today.getDate() - (6 - index));
-      return {
-        label: day.toLocaleDateString(undefined, { weekday: "short" }),
-        key: day.toDateString(),
-        count: 0,
-      };
-    });
-    (detail.audit || []).forEach((entry) => {
-      const when = parseDate(entry.created_at);
-      if (!when) return;
-      const match = days.find((day) => day.key === when.toDateString());
-      if (match) match.count += 1;
-    });
-    const max = Math.max(1, ...days.map((day) => day.count));
-    return days.map((day) => ({ ...day, pct: Math.round((day.count / max) * 100) }));
-  }, [detail.audit]);
-
+  const week = useMemo(() => countsByDay(detail.audit), [detail.audit]);
   const weekTotal = week.reduce((sum, day) => sum + day.count, 0);
+  const weekCounts = week.map((day) => day.count);
   const recent = (detail.audit || []).slice(0, 7);
+
+  const rotatedCount = detail.secrets.filter(isRecentlyRotated).length;
+  const staleAudit = detail.audit !== null && detail.audit.length === 0;
 
   async function handleCreate(event) {
     event.preventDefault();
@@ -180,10 +191,7 @@ export default function Dashboard() {
               Encrypted on this machine
             </span>
             <span className="status-item">
-              <span
-                className={`status-led ${online === true ? "led-on" : online === false ? "led-off" : ""}`.trim()}
-                aria-hidden="true"
-              />
+              <Heartbeat online={online} />
               Server {online === null ? "checking" : online ? "online" : "offline"}
             </span>
             <span className="status-item">Signed in as {user.email}</span>
@@ -209,18 +217,26 @@ export default function Dashboard() {
             <Card className="stat">
               <span className="stat-label">Teams</span>
               <span className="stat-value">{teams ? teams.length : "—"}</span>
+              <Sparkline values={[0, 0, 0, 0, 0, 0, teams ? teams.length : 0]} label="Teams" />
             </Card>
             <Card className="stat">
               <span className="stat-label">Teams you administer</span>
               <span className="stat-value">{teams ? adminTeams : "—"}</span>
+              <span className="stat-note">admin role</span>
             </Card>
             <Card className="stat">
               <span className="stat-label">Secrets you can read</span>
               <span className="stat-value">{teams ? totalSecrets : "—"}</span>
+              <span className="stat-note">across all teams</span>
             </Card>
-            <Card className="stat">
+                      <Card className={`stat ${rotatedCount > 0 ? "is-alert" : ""}`.trim()}>
               <span className="stat-label">Events this week</span>
               <span className="stat-value">{isAdmin && detail.audit ? weekTotal : "—"}</span>
+              <Sparkline
+                values={weekCounts}
+                color={rotatedCount > 0 ? "var(--danger)" : "var(--accent)"}
+                label="Events per day, last 7 days"
+              />
             </Card>
           </div>
 
@@ -255,7 +271,10 @@ export default function Dashboard() {
                           onClick={() => setSelectedId(team.id)}
                           aria-pressed={active}
                         >
-                          <span className="team-row-name">{team.name}</span>
+                          <span className="row-left">
+                            <PixelSprite name="shield" size={2} color={active ? "var(--accent)" : "var(--muted)"} />
+                            <span className="team-row-name">{team.name}</span>
+                          </span>
                           <span className={`badge badge-${team.role}`}>{team.role}</span>
                         </button>
                       </motion.li>
@@ -292,28 +311,56 @@ export default function Dashboard() {
 
                   <div className="detail-stats">
                     <div className="stat">
-                      <span className="stat-label">Secrets you can read</span>
+                      <span className="stat-label">Secrets</span>
                       <span className="stat-value">{detail.loading ? "—" : detail.secrets.length}</span>
                     </div>
                     <div className="stat">
-                      <span className="stat-label">Members</span>
-                      <span className="stat-value">{detail.loading ? "—" : detail.members.length}</span>
+                      <span className="stat-label">Needs rotation</span>
+                      <span className={`stat-value ${rotatedCount > 0 ? "is-alert" : ""}`.trim()}>
+                        {detail.loading ? "—" : rotatedCount}
+                      </span>
                     </div>
                   </div>
 
-                  <p className="eyebrow" style={{ marginTop: 6 }}>Secrets</p>
+                  <p className="eyebrow" style={{ marginTop: 6 }}>Members</p>
+                  {detail.loading ? (
+                    <SkeletonList rows={1} />
+                  ) : detail.members.length === 0 ? (
+                    <p className="muted small">No members loaded.</p>
+                  ) : (
+                    <div className="member-faces">
+                      {detail.members.map((member) => (
+                        <span key={member.user_id} className="member-face" title={`${member.full_name} · ${member.role}`}>
+                          <Identicon seed={member.user_id} size={4} color={member.role === "admin" ? "var(--accent)" : "var(--text)"} />
+                          <span className="member-face-name">{member.full_name}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  <p className="eyebrow" style={{ marginTop: 18 }}>Secrets</p>
                   {detail.loading ? (
                     <SkeletonList rows={2} />
                   ) : detail.secrets.length === 0 ? (
                     <p className="muted small">No secrets yet. Push one from the terminal.</p>
                   ) : (
                     <ul className="secret-preview">
-                      {detail.secrets.slice(0, 5).map((secret) => (
-                        <li key={secret.id}>
-                          <span>{secret.name}</span>
-                          <span className="pill">v{secret.version}</span>
-                        </li>
-                      ))}
+                      {detail.secrets.slice(0, 5).map((secret) => {
+                        const rotated = isRecentlyRotated(secret);
+                        return (
+                          <li key={secret.id}>
+                            <span className="row-left">
+                              <PixelSprite
+                                name={rotated ? "key" : "lock"}
+                                size={2}
+                                color={rotated ? "var(--danger)" : "var(--accent)"}
+                              />
+                              <span>{secret.name}</span>
+                            </span>
+                            <span className="pill">v{secret.version}</span>
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
 
@@ -338,18 +385,21 @@ export default function Dashboard() {
                 <SkeletonList rows={2} />
               ) : (
                 <div className="bars" role="img" aria-label={`${weekTotal} events in the last 7 days`}>
-                  {week.map((day) => (
-                    <div key={day.key} className="bar-col">
-                      <span className="bar-count">{day.count}</span>
-                      <motion.div
-                        className={`bar ${day.count === 0 ? "is-empty" : ""}`.trim()}
-                        initial={{ height: 0 }}
-                        animate={{ height: `${Math.max(day.pct, 3)}%` }}
-                        transition={{ duration: 0.6, ease: easeOut }}
-                      />
-                      <span className="bar-label">{day.label}</span>
-                    </div>
-                  ))}
+                  {week.map((day) => {
+                    const pct = Math.round((day.count / Math.max(1, ...weekCounts)) * 100);
+                    return (
+                      <div key={day.key} className="bar-col">
+                        <span className="bar-count">{day.count}</span>
+                        <motion.div
+                          className={`bar ${day.count === 0 ? "is-empty" : ""}`.trim()}
+                          initial={{ height: 0 }}
+                          animate={{ height: `${Math.max(pct, 3)}%` }}
+                          transition={{ duration: 0.6, ease: easeOut }}
+                        />
+                        <span className="bar-label">{day.label}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </Card>
@@ -362,7 +412,7 @@ export default function Dashboard() {
                 <p className="muted small">The audit log is visible to team admins.</p>
               ) : detail.loading || detail.audit === null ? (
                 <SkeletonList rows={3} />
-              ) : recent.length === 0 ? (
+              ) : staleAudit ? (
                 <p className="muted small">No activity yet in this team.</p>
               ) : (
                 <div>
