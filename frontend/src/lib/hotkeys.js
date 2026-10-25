@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-// G then D: go to the dashboard.
+// G then D: go to the dashboard (window of 1.5 seconds).
 // Ctrl/Cmd + K: focus the page search if one exists, otherwise go to the dashboard.
 export function useGlobalHotkeys(navigate) {
   useEffect(() => {
@@ -8,7 +8,12 @@ export function useGlobalHotkeys(navigate) {
 
     function isTyping(target) {
       const tag = target && target.tagName;
-      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || Boolean(target && target.isContentEditable);
+      return (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        Boolean(target && target.isContentEditable)
+      );
     }
 
     function handleKey(event) {
@@ -22,13 +27,16 @@ export function useGlobalHotkeys(navigate) {
         return;
       }
 
-      if (isTyping(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+      // Typing in a field: ignore shortcuts, except the Escape key.
+      if (isTyping(event.target)) return;
 
       if (key === "g") {
         gPressedAt = Date.now();
         return;
       }
-      if (key === "d" && Date.now() - gPressedAt < 900) {
+      if (key === "d" && Date.now() - gPressedAt < 1500) {
         gPressedAt = 0;
         navigate("/dashboard");
       }
